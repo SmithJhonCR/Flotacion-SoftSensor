@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>SCADA - Banco de Flotación (3 Celdas)</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        :root {
+            --bg-dark: #0a0e17;
+            --panel-bg: #151b2b;
+            --border-color: #2a354f;
+            --text-main: #e2e8f0;
+            --accent: #00f0ff;
+            --green: #00ff88;
+            --red: #ff3366;
+            --yellow: #ffcc00;
+        }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: var(--bg-dark);
+            color: var(--text-main);
+            margin: 0;
+            padding: 20px;
+            background-image: radial-gradient(circle at 50% 0%, #1a253d 0%, #0a0e17 70%);
+            min-height: 100vh;
+        }
+        h1 {
+            text-align: center;
+            color: var(--accent);
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            font-size: 24px;
+            margin-bottom: 30px;
+            text-shadow: 0 0 10px rgba(0, 240, 255, 0.5);
+        }
+        .grid-celdas {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 20px;
+            margin-bottom: 25px;
+        }
+        .panel {
+            background-color: var(--panel-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+            text-align: center;
+        }
+        .panel h2 {
+            color: #8ba3c7;
+            font-size: 16px;
+            margin-top: 0;
+            border-bottom: 1px solid var(--border-color);
+            padding-bottom: 10px;
+        }
+        .tanque {
+            width: 100px;
+            height: 160px;
+            border: 3px solid var(--border-color);
+            border-top: none;
+            margin: 20px auto;
+            position: relative;
+            background-color: #000;
+            border-radius: 0 0 8px 8px;
+            overflow: hidden;
+        }
+        .agua {
+            position: absolute;
+            bottom: 0;
+            width: 100%;
+            background: linear-gradient(to top, #0055ff, var(--accent));
+            transition: height 0.5s ease-in-out; /* Transición suave para que no brinque */
+            box-shadow: 0 0 15px var(--accent);
+        }
+        .datos {
+            display: flex;
+            justify-content: space-between;
+            font-family: 'Courier New', Courier, monospace;
+            font-size: 13px;
+            margin-bottom: 15px;
+            background: #0d131f;
+            padding: 10px;
+            border-radius: 6px;
+        }
+        .valor-destacado { color: var(--green); font-weight: bold; }
+        .valor-bomba { color: var(--yellow); font-weight: bold; }
+        
+        input[type=range] {
+            -webkit-appearance: none;
+            width: 100%;
+            background: transparent;
+        }
+        input[type=range]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            height: 16px;
+            width: 16px;
+            border-radius: 50%;
+            background: var(--accent);
+            cursor: pointer;
+            margin-top: -6px;
+            box-shadow: 0 0 10px var(--accent);
+        }
+        input[type=range]::-webkit-slider-runnable-track {
+            width: 100%;
+            height: 4px;
+            cursor: pointer;
+            background: var(--border-color);
+            border-radius: 2px;
+        }
+        .panel-grafico {
+            background-color: var(--panel-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 20px;
+            height: 350px;
+        }
+        .canvas-container {
+            position: relative;
+            height: 100%;
+            width: 100%;
+        }
+        canvas {
+            position: absolute;
+            top: 0; left: 0;
+            width: 100% !important;
+            height: 100% !important;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>🏭 Control de Nivel - Banco de Flotación</h1>
+
+    <div class="grid-celdas">
+        <div class="panel" id="celda-0"></div>
+        <div class="panel" id="celda-1"></div>
+        <div class="panel" id="celda-2"></div>
+    </div>
+
+    <div class="panel-grafico">
+        <h2 style="color:#8ba3c7; text-align:center; margin-top:0;">TENDENCIAS DE NIVEL (cm)</h2>
+        <div class="canvas-container">
+            <canvas id="grafico"></canvas>
+        </div>
+    </div>
+
+    <script>
+        // 1. Crear la estructura HTML de las celdas
+        for (let i = 0; i < 3; i++) {
+            document.getElementById(`celda-${i}`).innerHTML = `
+                <h2>CELDA C-${i+1}</h2>
+                <div class="tanque"><div class="agua" id="agua-${i}" style="height: 50%;"></div></div>
+                <div class="datos">
+                    <span>Nivel: <span class="valor-destacado" id="nivel-${i}">30.0</span> cm</span>
+                    <span>Bomba: <span class="valor-bomba" id="flujo-${i}">10.0</span> LPM</span>
+                </div>
+                <label style="font-size:12px; color:#8ba3c7;">Setpoint: <span id="sp-txt-${i}">30</span> cm</label>
+                <input type="range" id="slider-${i}" min="15" max="40" value="30" oninput="cambiarSP(${i}, this.value)">
+            `;
+        }
+
+        // 2. Configurar Gráfico Nítido
+        Chart.defaults.color = '#8ba3c7';
+        Chart.defaults.font.family = "'Courier New', Courier, monospace";
+        const ctx = document.getElementById('grafico').getContext('2d');
+        
+        const chart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: Array(50).fill(''),
+                datasets: [
+                    { label: 'Celda 1', borderColor: '#ff3366', backgroundColor: 'rgba(255, 51, 102, 0.1)', data: Array(50).fill(30), borderWidth: 2, pointRadius: 0, tension: 0.3, fill: true },
+                    { label: 'Celda 2', borderColor: '#00ff88', backgroundColor: 'rgba(0, 255, 136, 0.1)', data: Array(50).fill(30), borderWidth: 2, pointRadius: 0, tension: 0.3, fill: true },
+                    { label: 'Celda 3', borderColor: '#00f0ff', backgroundColor: 'rgba(0, 240, 255, 0.1)', data: Array(50).fill(30), borderWidth: 2, pointRadius: 0, tension: 0.3, fill: true }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                animation: { duration: 0 }, 
+                scales: {
+                    y: { min: 0, max: 50, grid: { color: '#2a354f' }, ticks: { stepSize: 10 } },
+                    x: { display: false }
+                },
+                plugins: {
+                    legend: { labels: { color: '#e2e8f0', font: { size: 14 } } }
+                }
+            }
+        });
+
+        // 3. Bucle de actualización (Sin duplicar peticiones)
+        function actualizarInterfaz() {
+            fetch('/api/datos')
+                .then(res => res.json())
+                .then(data => {
+                    for (let i = 0; i < 3; i++) {
+                        document.getElementById(`nivel-${i}`).innerText = data.niveles[i].toFixed(1);
+                        document.getElementById(`flujo-${i}`).innerText = data.flujos[i].toFixed(1);
+                        
+                        let porcentaje = (data.niveles[i] / 45.0) * 100;
+                        document.getElementById(`agua-${i}`).style.height = porcentaje + '%';
+                        
+                        chart.data.datasets[i].data.push(data.niveles[i]);
+                        chart.data.datasets[i].data.shift();
+                    }
+                    chart.update();
+                })
+                .catch(err => console.log("Esperando servidor..."));
+        }
+
+        // Actualizar cada 800ms (un poco más lento para que el ojo humano lo disfrute)
+        setInterval(actualizarInterfaz, 800);
+
+        function cambiarSP(celda, val) {
+            document.getElementById(`sp-txt-${celda}`).innerText = val;
+            fetch(`/api/setpoint/${celda}/${val}`);
+        }
+    </script>
+</body>
+</html>
